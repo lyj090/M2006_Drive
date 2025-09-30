@@ -12,7 +12,7 @@
 #include "uart_serial.h"
 
 #define HEAD_LENGTH 2
-#define PAYLOAD_LENGTH 13
+#define PAYLOAD_LENGTH 14
 #define BAG_LENGTH (HEAD_LENGTH + PAYLOAD_LENGTH)
 
 
@@ -38,6 +38,7 @@ typedef union
                 float angle_fdb;
                 float rpm_fdb;
                 float torque_fdb;
+                uint8_t slide_init;
             }__attribute__((packed));
         };
     }__attribute__((packed));
@@ -85,8 +86,8 @@ void UartTransmit(DJI_Motor_s *Motor)
     UartBag.angle_fdb = Motor->globalAngle.angleAll;
     UartBag.rpm_fdb = Motor->FdbData.rpm;
     UartBag.torque_fdb = Motor->FdbData.torque;
-
-
+    UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
+    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
     HAL_UART_Transmit(&huart1, &UartBag, BAG_LENGTH, 10);
 }
 
@@ -129,7 +130,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void UART_INIT()
 {
     HAL_UART_Receive_IT(&huart1, &RxBuffer, 2*BAG_LENGTH);
-    printf("uart_init \n");
+    HAL_UART_Transmit(&huart1, (uint8_t *)"UART_INIT", sizeof("UART_INIT"),1000);
 }
 
 /**

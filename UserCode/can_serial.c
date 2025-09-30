@@ -163,7 +163,7 @@ void CanSerialTask(void const *argument)
         }
         if(i++ > 10)
         {
-            printf("1:%.2f, 2:%.2f, 3:%.2f \n", motor[0].RefData.current_ref, motor[1].RefData.current_ref, motor[2].RefData.current_ref);
+            // printf("1:%.2f, 2:%.2f, 3:%.2f \n", motor[0].RefData.current_ref, motor[1].RefData.current_ref, motor[2].RefData.current_ref);
             i = 0;
         }
         

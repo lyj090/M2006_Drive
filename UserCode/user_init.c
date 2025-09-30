@@ -31,7 +31,7 @@ void lightTask()
 void lightTaskStart()
 {
     osThreadDef(light, lightTask, osPriorityNormal, 0, 512);
-	osThreadCreate(osThread(light), NULL);
+	osThreadId lightTaskId = osThreadCreate(osThread(light), NULL);
 }
 
 /**
@@ -46,5 +46,3 @@ void USER_INIT()
     CanSerialTaskStart();
     SerialTaskStart();
 }
-
-
