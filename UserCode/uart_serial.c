@@ -9,7 +9,6 @@
  * 
  */
 
-
 #include "uart_serial.h"
 
 // 通信包各个部分长度定义
@@ -19,13 +18,12 @@
 #define SLIDE_INIT_LENGTH 1
 #define CRC_LENGTH 1
 // crc校验使用data_num与motor_data，slide_init
-#define SEND_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * 2 + SLIDE_INIT_LENGTH + CRC_LENGTH)
-#define RECV_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH + CRC_LENGTH)
-#define MIN_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH + CRC_LENGTH)
+#define SEND_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH)
+#define RECV_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH)
 
 uint8_t HEADER[2] = {0x44, 0x22};
 // TODO: 这里的缓冲区大小可以根据实际情况进行调整
-uint8_t RxBuffer[1] = {RECV_BAG_LENGTH};
+uint8_t RxBuffer[1] = {0};
 // 环形缓冲区定义
 #define PIPE_SIZE 64
 typedef struct __attribute__((packed))
@@ -61,12 +59,10 @@ typedef union
         uint8_t data_num;
         union
         {
-            // uint8_t motor_data[MOTOR_DATA_LENGTH*2];
-            uint8_t motor_data[MOTOR_DATA_LENGTH];
+            uint8_t motor_data[MOTOR_DATA_LENGTH * USE_MOTOR_NUM];
             struct
             {
-                // MotorData_t motor0;
-                MotorData_t motor1;
+                MotorData_t motor_data_struct[USE_MOTOR_NUM];
             }__attribute__((packed));
         };
         uint8_t slide_init;
@@ -134,21 +130,15 @@ void UartTransmitAll(DJI_Motor_s *Motor)
 
     UartBag.header[0] = HEADER[0];
     UartBag.header[1] = HEADER[1];
-    // UartBag.data_num = MOTOR_DATA_LENGTH * 2 + SLIDE_INIT_LENGTH + CRC_LENGTH;
-    UartBag.data_num = MOTOR_DATA_LENGTH + SLIDE_INIT_LENGTH + CRC_LENGTH;
-    // TODO: 这里暂时只发送一个电机的数据，后续可以根据需要发送多个电机的数据
-    // UartBag.motor0.id = 0;
-    // UartBag.motor0.angle_fdb = Motor[0].globalAngle.angleAll;
-    // UartBag.motor0.rpm_fdb = Motor[0].FdbData.rpm;
-    // UartBag.motor0.torque_fdb = Motor[0].FdbData.torque;
+    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH;
 
-    UartBag.motor1.id = 1;
-    // UartBag.motor1.angle_fdb = Motor[1].RefData.angle_ref;
-    // UartBag.motor1.rpm_fdb = Motor[1].RefData.rpm_ref;
-    // UartBag.motor1.torque_fdb = Motor[1].RefData.current_ref;
-    UartBag.motor1.angle_fdb = Motor[1].globalAngle.angleAll;
-    UartBag.motor1.rpm_fdb = Motor[1].FdbData.rpm;
-    UartBag.motor1.torque_fdb = Motor[1].FdbData.torque;
+    for(int i = 0; i < USE_MOTOR_NUM; ++i)
+    {
+        UartBag.motor_data_struct[i].id = Motor[i].id;
+        UartBag.motor_data_struct[i].angle_fdb = Motor[i].globalAngle.angleAll;
+        UartBag.motor_data_struct[i].rpm_fdb = Motor[i].FdbData.rpm;
+        UartBag.motor_data_struct[i].torque_fdb = Motor[i].FdbData.torque;
+    }
 
     UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
     HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
@@ -167,22 +157,22 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
 
     UartBag.header[0] = HEADER[0];
     UartBag.header[1] = HEADER[1];
-    // UartBag.data_num = MOTOR_DATA_LENGTH * 2 + SLIDE_INIT_LENGTH + CRC_LENGTH;
-    UartBag.data_num = MOTOR_DATA_LENGTH + SLIDE_INIT_LENGTH + CRC_LENGTH;
-    // TODO: 这里暂时只发送一个电机的数据，后续可以根据需要发送多个电机的数据
-    // UartBag.motor0.id = 0;
-    // UartBag.motor0.angle_fdb = Motor[0].globalAngle.angleAll;
-    // UartBag.motor0.rpm_fdb = Motor[0].FdbData.rpm;
-    // UartBag.motor0.torque_fdb = Motor[0].FdbData.torque;
+    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH;
 
-    UartBag.motor1.id = 1;
-    // UartBag.motor1.angle_fdb = num;
-    UartBag.motor1.angle_fdb = Motor[1].RefData.angle_ref;
-    UartBag.motor1.rpm_fdb = Motor[1].RefData.rpm_ref;
-    UartBag.motor1.torque_fdb = Motor[1].RefData.current_ref;
-    // UartBag.motor1.angle_fdb = Motor[1].globalAngle.angleAll;
-    // UartBag.motor1.rpm_fdb = Motor[1].FdbData.rpm;
-    // UartBag.motor1.torque_fdb = Motor[1].FdbData.torque;
+    for(int i = 0; i < USE_MOTOR_NUM; ++i)
+    {
+        UartBag.motor_data_struct[i].id = Motor[i].id;
+        if(num)
+        {
+            UartBag.motor_data_struct[i].angle_fdb = num;
+        }
+        else
+        {
+            UartBag.motor_data_struct[i].angle_fdb = Motor[i].RefData.angle_ref;
+        }
+        UartBag.motor_data_struct[i].rpm_fdb = Motor[i].RefData.rpm_ref;
+        UartBag.motor_data_struct[i].torque_fdb = Motor[i].RefData.current_ref;
+    }
 
     UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
     HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
@@ -216,12 +206,12 @@ void DataPipePop(DataPipe_t *data_pipe,uint8_t pop_step) {
 
 void DataPipeProcess()
 {
-    while (DataPipeAvailable(&data_pipe) >= MIN_BAG_LENGTH) {
+    while (DataPipeAvailable(&data_pipe) >= RECV_BAG_LENGTH) {
         // 查找包头
         if (data_pipe.buffer[data_pipe.read_idx] == HEADER[0] && data_pipe.buffer[(data_pipe.read_idx+1)%PIPE_SIZE] == HEADER[1]) {
             uint16_t idx_data_num = (data_pipe.read_idx + 2) % PIPE_SIZE;
             uint8_t data_num = data_pipe.buffer[idx_data_num];
-            uint8_t motor_data_num = data_num - SLIDE_INIT_LENGTH - CRC_LENGTH;
+            uint8_t motor_data_num = data_num - CRC_LENGTH;
             if (motor_data_num < MOTOR_DATA_LENGTH || motor_data_num % MOTOR_DATA_LENGTH != 0) {
                 DataPipePop(&data_pipe,1);
                 continue;
@@ -233,14 +223,14 @@ void DataPipeProcess()
             }
             // 计算CRC
             uint8_t crc = 0;
-            for (int i = 0; i < data_num - 1; ++i) {
+            for (int i = 0; i < data_num; ++i) {
                 crc += data_pipe.buffer[(data_pipe.read_idx + 2 + i) % PIPE_SIZE];
             }
             // 校验CRC
-            uint8_t crc_recv = data_pipe.buffer[(data_pipe.read_idx + 2 + data_num - 1) % PIPE_SIZE];
+            uint8_t crc_recv = data_pipe.buffer[(data_pipe.read_idx + 2 + data_num) % PIPE_SIZE];
             if (crc == crc_recv) {
                 // 处理电机数据
-                int motor_count = (data_num - SLIDE_INIT_LENGTH - CRC_LENGTH) / MOTOR_DATA_LENGTH;
+                int motor_count = (data_num - CRC_LENGTH) / MOTOR_DATA_LENGTH;
                 for (int k = 0; k < motor_count; ++k) {
                     int base = (data_pipe.read_idx + HEAD_LENGTH + DATA_NUM_LENGTH + k * MOTOR_DATA_LENGTH) % PIPE_SIZE;
                     // 复制出一份连续的电机数据
@@ -255,7 +245,8 @@ void DataPipeProcess()
                         motor[motorData->id].RefData.current_ref = motorData->torque_fdb;
                     }
                 }
-                UartTransmitDEBUG(motor,0);
+                // UartTransmitDEBUG(motor,0);
+                UartTransmitAll(motor);
                 // 跳过已处理的数据包
                 DataPipePop(&data_pipe,total_packet_len);
                 // 清空串口缓存区
@@ -311,12 +302,13 @@ void SerialTask()
 {
     UART_INIT();
 
-    // for(;;)
-    // {
-    //     // time management TODO: 这里的延时可以改成更精确的时间管理
-    //     UartTransmitAll(motor);
-    //     osDelay(1000 / (float)UART_SERIAL_FREQUENCY);        
-    // }
+    for(;;)
+    {
+        // time management TODO: 这里的延时可以改成更精确的时间管理
+        // 注释该循环无法进入中断
+        // UartTransmitAll(motor);
+        osDelay(1000 / (float)UART_SERIAL_FREQUENCY);        
+    }
 }
 
 /**
