@@ -9,3 +9,7 @@
 串口通信协议*UserCode/uart_serial.c*中定义，目前支持电机的位置，速度和电流控制。
 
 电机限位在*UserCode/user_defination.c*中定义，可按需进行更改或在*UserCode/user_defination.c:MOTOR_IS_POS*中更改其控制类型
+
+通讯规则定义
+包头 数据长度 数据 校验位
+2    n*13 + m*1 + 1   

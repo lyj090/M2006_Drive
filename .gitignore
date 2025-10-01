@@ -15,4 +15,4 @@ out
 *.eide-template
 
 # 不储存keil生成的文件
-MDK-ARM/M2006_Drive/*
+MDK-ARM/*

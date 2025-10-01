@@ -167,8 +167,8 @@ void CanSerialTask(void const *argument)
             i = 0;
         }
         
-        CanTransmitMotor0123(motor[0].current_out, motor[1].current_out,  motor[2].current_out,  motor[3].current_out);
-        // CanTransmitMotor0123(0, 0, 0, 0);
+        // CanTransmitMotor0123(motor[0].current_out, motor[1].current_out,  motor[2].current_out,  motor[3].current_out);
+        CanTransmitMotor0123(0, 0, 0, 0);
 
         osDelay(1000/(float)CAN_SERIAL_FREQUENCY);
     }
