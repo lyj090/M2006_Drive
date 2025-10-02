@@ -16,11 +16,11 @@
  */
 void lightTask()
 {
+    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12|GPIO_PIN_11|GPIO_PIN_10, GPIO_PIN_RESET);
     for(;;)
     {
         HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_10);
-        osDelay(500);
-
+        osDelay(1000);
     }
 }
 

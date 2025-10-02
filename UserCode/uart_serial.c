@@ -23,6 +23,8 @@
 
 uint8_t HEADER[2] = {0x44, 0x22};
 uint8_t RxBuffer[1] = {0};
+#define SLIDE_INIT_SIGNAL_LENGTH 3
+uint8_t slide_init_signal[SLIDE_INIT_SIGNAL_LENGTH] = {0};
 // 环形缓冲区定义
 #define PIPE_SIZE 64
 typedef struct __attribute__((packed))
@@ -90,8 +92,7 @@ void UartTransmitAll(DJI_Motor_s *Motor)
         UartBag.motor_data_struct[i].torque_fdb = Motor[i].FdbData.torque;
     }
 
-    UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
+    UartBag.slide_init = slide_init_signal[0];
 
     UartBag.crc = 0;
     for(int i = 2; i < 2 + UartBag.data_num-1; ++i)
@@ -126,8 +127,7 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
         UartBag.motor_data_struct[i].torque_fdb = Motor[i].RefData.current_ref;
     }
 
-    UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
+    UartBag.slide_init = slide_init_signal[0];
     UartBag.crc = 0;
     for(int i = 2; i < 2 + UartBag.data_num-1; ++i)
     {
@@ -265,6 +265,19 @@ void SerialTask()
         // time management TODO: 这里的延时可以改成更精确的时间管理
         // 注释该循环无法进入中断
         // UartTransmitAll(motor);
+
+        // --- 滑块初始化信号处理 ---
+        for(int i = SLIDE_INIT_SIGNAL_LENGTH - 1; i > 0; --i)
+            slide_init_signal[i] = slide_init_signal[i-1];
+        // 红外限位传感器：到达限位输出低电平，反转后1表示到达限位
+        uint8_t limit_reached = GPIO_PIN_SET - HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
+        slide_init_signal[0] = limit_reached;
+        HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, limit_reached); // 指示灯同步
+        // 一次触及限位信号时发送一次
+        if(limit_reached && slide_init_signal[1] && !slide_init_signal[2]) {
+            UartTransmitAll(motor);
+        }
+
         osDelay(1000 / (float)UART_SERIAL_FREQUENCY);        
     }
 }
