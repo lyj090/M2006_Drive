@@ -72,6 +72,7 @@ typedef struct
     struct
     {
         float angleAll;
+        float angleLast;
         int round;
         float angleOffset;
     }globalAngle;

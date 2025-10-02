@@ -15,14 +15,13 @@
 #define HEAD_LENGTH 2
 #define DATA_NUM_LENGTH 1
 #define MOTOR_DATA_LENGTH 13
-#define SLIDE_INIT_LENGTH 1
+#define SLIDE_INIT_LENGTH 1 //上行数据有，下行数据无
 #define CRC_LENGTH 1
-// crc校验使用data_num与motor_data，slide_init
+// crc校验不包括数据头
 #define SEND_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH)
 #define RECV_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH)
 
 uint8_t HEADER[2] = {0x44, 0x22};
-// TODO: 这里的缓冲区大小可以根据实际情况进行调整
 uint8_t RxBuffer[1] = {0};
 // 环形缓冲区定义
 #define PIPE_SIZE 64
@@ -70,55 +69,6 @@ typedef union
     }__attribute__((packed));
 }__attribute__((packed)) SEND_Bag_u;
 
-// /**
-//  * @brief 电机控制包，从上位机接受
-//  * 
-//  */
-// typedef union
-// {
-//     uint8_t data[BAG_LENGTH];
-//     struct 
-//     {
-//         uint8_t header[HEAD_LENGTH];
-//         uint8_t data_num;
-//         union
-//         {
-//             uint8_t payload[PAYLOAD_LENGTH];
-//             struct
-//             {
-//                 uint8_t id;
-//                 float angle_ref;
-//                 float rpm_ref;
-//                 float current_ref;
-//             }__attribute__((packed));
-//         };
-//     }__attribute__((packed));
-// }__attribute__((packed)) RECV_Bag_u;
-
-
-
-// /**
-
-//  * @brief 将某个电机的反馈量发送给上位机
-//  * 
-//  * @param Motor
-//  */
-// void UartTransmit(DJI_Motor_s *Motor)
-// {
-//     SEND_Bag_u UartBag;
-
-//     UartBag.header[0] = HEADER[0];
-//     UartBag.header[1] = HEADER[1];
-
-//     UartBag.id = Motor->id;
-//     UartBag.angle_fdb = Motor->globalAngle.angleAll;
-//     UartBag.rpm_fdb = Motor->FdbData.rpm;
-//     UartBag.torque_fdb = Motor->FdbData.torque;
-//     UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-//     HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
-//     HAL_UART_Transmit(&huart1, &UartBag, BAG_LENGTH, 10);
-// }
-
 /**
  * @brief 将所有数据发送给上位机
  * 
@@ -142,12 +92,14 @@ void UartTransmitAll(DJI_Motor_s *Motor)
 
     UartBag.slide_init = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
     HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, UartBag.slide_init);
+
     UartBag.crc = 0;
     for(int i = 2; i < 2 + UartBag.data_num-1; ++i)
     {
         UartBag.crc += UartBag.data[i];
     }
     UartBag.crc += UartBag.slide_init;
+
     HAL_UART_Transmit(&huart1, &UartBag, SEND_BAG_LENGTH, 10);
 }
 
@@ -240,6 +192,12 @@ void DataPipeProcess()
                     }
                     MotorData_t *motorData = (MotorData_t *)temp;
                     if (motorData->id < USE_MOTOR_NUM) {
+                        // 位置保护，输入保护，限制输入在范围内
+                        if(motorData->angle_fdb > MOTOR_MAX[motorData->id] || motorData->angle_fdb < MOTOR_MIN[motorData->id])
+                        {
+                            // 不修改ref
+                            continue;
+                        }
                         motor[motorData->id].RefData.angle_ref = motorData->angle_fdb;
                         motor[motorData->id].RefData.rpm_ref = motorData->rpm_fdb;
                         motor[motorData->id].RefData.current_ref = motorData->torque_fdb;

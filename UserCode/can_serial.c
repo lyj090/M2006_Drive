@@ -9,7 +9,8 @@
  */
 
 #include "can_serial.h"
-
+#define ENCODER_MAX_VALUE 8191.0f
+#define ENCODER_JUMP_THRESHOLD (ENCODER_MAX_VALUE / 2)
 
 /**
  * @brief 一次性发送四个电机的控制电流
@@ -62,19 +63,17 @@ void UpdataMotor(DJI_Motor_s *Motor, uint8_t *CanData)
     Motor->FdbData.rpm = Motor->AxisData.axisRpm/36.0;
 
     //M2006转子转一圈（360）对应的返回值为8191
-    static float angle_last[4] = {4000,4000,4000,4000};
-    if(Motor->FdbData.angle - angle_last[Motor->id] > 5000)
-    {
+    // 多圈识别，防止编码器回零跳变
+    float delta = Motor->FdbData.angle - Motor->globalAngle.angleLast;
+    if(delta > ENCODER_JUMP_THRESHOLD) {
         Motor->globalAngle.round--;
-    }
-    if(Motor->FdbData.angle - angle_last[Motor->id] < -5000)
-    {
+    } else if(delta < -ENCODER_JUMP_THRESHOLD) {
         Motor->globalAngle.round++;
     }
     Motor->AxisData.axisAngleAll = (Motor->FdbData.angle + Motor->globalAngle.round * 8191.0 - Motor->globalAngle.angleOffset)/8191.0*360;
     Motor->globalAngle.angleAll = Motor->AxisData.axisAngleAll/36.0;
 
-    angle_last[Motor->id] = Motor->FdbData.angle;
+    Motor->globalAngle.angleLast = Motor->FdbData.angle;
 }
 
 
@@ -100,6 +99,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         {
             motor[id].globalAngle.angleOffset = (int16_t)(CanReceiveData[0] << 8 | CanReceiveData[1]);
             motor[id].FdbData.msg_cnt++;
+        }
+        else if(motor[id].FdbData.msg_cnt == 20)
+        {
+            motor[id].globalAngle.angleOffset = (int16_t)(CanReceiveData[0] << 8 | CanReceiveData[1]);
+            motor[id].FdbData.msg_cnt++;
+            motor[id].globalAngle.angleLast = motor[id].globalAngle.angleOffset;
         }
         else
         {
@@ -150,25 +155,23 @@ void CanSerialTask(void const *argument)
     for(;;)
     {
         MotorCtrl();
-        //位置保护
+        //位置保护，输出保护
         for(int i = 0; i < USE_MOTOR_NUM; i++)
         {
-            if(MOTOR_IS_POS[i])
-            {
-                if(motor[i].globalAngle.angleAll < MOTOR_MIN[i] || motor[i].globalAngle.angleAll > MOTOR_MAX[i])
-                {
+            float pos = motor[i].globalAngle.angleAll;
+            float ref = motor[i].RefData.angle_ref;
+            if (MOTOR_IS_POS[i]) {
+                // TODO：已经限制输入在范围内，ref不会超过范围，待修改此处位置限制输出
+                if ((pos < MOTOR_MIN[i] && ref <= pos) || (pos > MOTOR_MAX[i] && ref >= pos)) {
+                    // 继续远离限位，禁止输出
                     motor[i].current_out = 0;
                 }
+                // 否则允许输出，让电机回到安全区间
             }
         }
-        if(i++ > 10)
-        {
-            // printf("1:%.2f, 2:%.2f, 3:%.2f \n", motor[0].RefData.current_ref, motor[1].RefData.current_ref, motor[2].RefData.current_ref);
-            i = 0;
-        }
         
-        // CanTransmitMotor0123(motor[0].current_out, motor[1].current_out,  motor[2].current_out,  motor[3].current_out);
-        CanTransmitMotor0123(0, 0, 0, 0);
+        CanTransmitMotor0123(motor[0].current_out, motor[1].current_out,  motor[2].current_out,  motor[3].current_out);
+        // CanTransmitMotor0123(0, 0, 0, 0);
 
         osDelay(1000/(float)CAN_SERIAL_FREQUENCY);
     }
