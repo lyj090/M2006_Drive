@@ -81,6 +81,22 @@ void MotorCtrl()
 {
     for(int i = 0; i < 4; i++)
     {
+#if MOTOR_CTRL_CURRENT_ONLY
+        // 下位机仅执行电流限幅，上层负责MIT/PID控制律计算
+        float i_ref = motor[i].RefData.current_ref;
+        if(i_ref > M2006_CURRENT_MAX)
+        {
+            motor[i].current_out = M2006_CURRENT_MAX;
+        }
+        else if(i_ref < -M2006_CURRENT_MAX)
+        {
+            motor[i].current_out = -M2006_CURRENT_MAX;
+        }
+        else
+        {
+            motor[i].current_out = i_ref;
+        }
+#else
         //位置伺服
         if(motor[i].RefData.angle_ref!=-1)
         {
@@ -115,6 +131,7 @@ void MotorCtrl()
         {
             motor[i].current_out = 0;
         }
+#endif
     }
 }
 

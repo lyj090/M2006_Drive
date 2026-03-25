@@ -192,12 +192,14 @@ void DataPipeProcess()
                     }
                     MotorData_t *motorData = (MotorData_t *)temp;
                     if (motorData->id < USE_MOTOR_NUM) {
+#if !MOTOR_CTRL_CURRENT_ONLY
                         // 位置保护，输入保护，限制输入在范围内
                         if(motorData->angle_fdb > MOTOR_MAX[motorData->id] || motorData->angle_fdb < MOTOR_MIN[motorData->id])
                         {
                             // 不修改ref
                             continue;
                         }
+#endif
                         motor[motorData->id].RefData.angle_ref = motorData->angle_fdb;
                         motor[motorData->id].RefData.rpm_ref = motorData->rpm_fdb;
                         motor[motorData->id].RefData.current_ref = motorData->torque_fdb;

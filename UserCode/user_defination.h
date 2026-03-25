@@ -23,6 +23,8 @@
 #define USE_MOTOR_NUM 2
 #define M2006_CURRENT_MAX 10000
 #define M2006_KT 0.18
+// 1: 仅电流模式（上位机做MIT/PID），0: 保留本地下位机三环逻辑
+#define MOTOR_CTRL_CURRENT_ONLY 1
 
 
 extern int MOTOR_IS_POS[USE_MOTOR_NUM];
@@ -47,6 +49,7 @@ typedef struct
 
 
 void PID_Cal(PID_s *pid, float ref, float fdb);
+void MotorCtrl();
 
 /**
  * @brief 包含了电机的反馈量，控制量和输出量
