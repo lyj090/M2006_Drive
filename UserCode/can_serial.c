@@ -111,10 +111,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             UpdataMotor(&motor[id], CanReceiveData);
         }
     }
-    else
-    {
-        Error_Handler(); 
-    }
+    /* 总线上其它标准帧（非本机电调反馈）直接忽略，避免误进 Error_Handler */
 }
 
 
@@ -151,7 +148,6 @@ void CanSerialTask(void const *argument)
     CAN_INIT();
     osDelay(200);
 
-    int i = 0;
     for(;;)
     {
         MotorCtrl();
@@ -182,7 +178,7 @@ void CanSerialTask(void const *argument)
  * @brief 注册can通信线程
  * 
  */
-void CanSerialTaskStart()
+void CanSerialTaskStart(void)
 {
     osThreadDef(CanSerial, CanSerialTask, osPriorityNormal, 0, 512);
 	osThreadCreate(osThread(CanSerial), NULL);

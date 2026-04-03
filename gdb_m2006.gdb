@@ -1,8 +1,8 @@
 # M2006_Drive — 配合 OpenOCD 排查启动/灯不闪
 #
-# 终端 A（保持运行）:
-#   openocd -s /usr/share/openocd/scripts \
-#     -f interface/stlink-v2.cfg -f target/stm32f4x.cfg
+# 终端 A（保持运行），在工程根目录任选其一:
+#   make openocd
+#   openocd -s $PWD/openocd -s /usr/share/openocd/scripts -f openocd/m2006_drive.cfg
 #
 # 终端 B:
 #   cd /path/to/M2006_Drive

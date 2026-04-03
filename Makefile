@@ -1,110 +1,61 @@
-# GNU Make + arm-none-eabi-gcc — STM32F427IIHx (与 CubeIDE 工程源文件一致，并包含 UserCode)
-TARGET    := M2006_Drive
-BUILD_DIR := build
+# 薄封装：编译走 CMake（CubeMX 工程），本文件仅提供常用入口与 OpenOCD 烧录。
+# 默认构建目录与 CMake -B 一致，可通过 BUILD_DIR=... 覆盖。
 
-PREFIX  ?= arm-none-eabi-
-CC      := $(PREFIX)gcc
-AS      := $(PREFIX)gcc -x assembler-with-cpp
-OBJCOPY := $(PREFIX)objcopy
-SIZE    := $(PREFIX)size
+TARGET           := M2006_Drive
+BUILD_DIR        ?= build
+CMAKE            ?= cmake
+TOOLCHAIN        ?= cmake/gcc-arm-none-eabi.cmake
+CMAKE_BUILD_TYPE ?= Debug
 
-MCU_FLAGS := -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+OPENOCD          ?= openocd
+OPENOCD_SCRIPTS  ?= /usr/share/openocd/scripts
+OPENOCD_CFG      := openocd/m2006_drive.cfg
 
-INCLUDES := \
-	-ICore/Inc \
-	-IDrivers/STM32F4xx_HAL_Driver/Inc \
-	-IDrivers/STM32F4xx_HAL_Driver/Inc/Legacy \
-	-IMiddlewares/Third_Party/FreeRTOS/Source/include \
-	-IMiddlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS \
-	-IMiddlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F \
-	-IDrivers/CMSIS/Device/ST/STM32F4xx/Include \
-	-IDrivers/CMSIS/Include \
-	-IUserCode
-
-CFLAGS := $(MCU_FLAGS) \
-	-DSTM32F427xx -DUSE_HAL_DRIVER -DDEBUG \
-	-Og -g3 $(INCLUDES) \
-	-Wall -Wno-unused-parameter \
-	-fdata-sections -ffunction-sections
-
-LDFLAGS := $(MCU_FLAGS) \
-	-T STM32CubeIDE/STM32F427IIHX_FLASH.ld \
-	-Wl,-Map=$(BUILD_DIR)/$(TARGET).map -Wl,--gc-sections \
-	--specs=nano.specs --specs=nosys.specs
-
-SRCS_C := \
-	UserCode/user_defination.c \
-	UserCode/can_serial.c \
-	UserCode/uart_serial.c \
-	UserCode/user_init.c \
-	Core/Src/system_stm32f4xx.c \
-	Core/Src/can.c \
-	Core/Src/freertos.c \
-	Core/Src/gpio.c \
-	Core/Src/main.c \
-	Core/Src/stm32f4xx_hal_msp.c \
-	Core/Src/stm32f4xx_hal_timebase_tim.c \
-	Core/Src/stm32f4xx_it.c \
-	Core/Src/usart.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_can.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma_ex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_exti.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ramfunc.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr_ex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c \
-	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c \
-	Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.c \
-	Middlewares/Third_Party/FreeRTOS/Source/croutine.c \
-	Middlewares/Third_Party/FreeRTOS/Source/event_groups.c \
-	Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c \
-	Middlewares/Third_Party/FreeRTOS/Source/list.c \
-	Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c \
-	Middlewares/Third_Party/FreeRTOS/Source/queue.c \
-	Middlewares/Third_Party/FreeRTOS/Source/stream_buffer.c \
-	Middlewares/Third_Party/FreeRTOS/Source/tasks.c \
-	Middlewares/Third_Party/FreeRTOS/Source/timers.c \
-	STM32CubeIDE/Application/User/Core/syscalls.c \
-	STM32CubeIDE/Application/User/Core/sysmem.c
-
-SRCS_S := STM32CubeIDE/Application/User/Startup/startup_stm32f427iihx.s
-
-OBJS := $(SRCS_C:%.c=$(BUILD_DIR)/%.o) $(SRCS_S:%.s=$(BUILD_DIR)/%.o)
+PREFIX   ?= arm-none-eabi-
+OBJCOPY  := $(PREFIX)objcopy
+SIZE     := $(PREFIX)size
 
 ELF := $(BUILD_DIR)/$(TARGET).elf
 BIN := $(BUILD_DIR)/$(TARGET).bin
 HEX := $(BUILD_DIR)/$(TARGET).hex
 
-.PHONY: all clean
+NPROC := $(shell nproc 2>/dev/null || echo 4)
 
-all: $(ELF) $(BIN) $(HEX)
+.PHONY: all configure clean distclean flash openocd bin hex size
+
+all: $(BUILD_DIR)/CMakeCache.txt
+	$(CMAKE) --build $(BUILD_DIR) --parallel $(NPROC)
 	$(SIZE) $(ELF)
 
-$(ELF): $(OBJS)
-	$(CC) $(OBJS) $(LDFLAGS) -o $@
+$(BUILD_DIR)/CMakeCache.txt:
+	$(CMAKE) -S . -B $(BUILD_DIR) \
+		-DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 
-$(BUILD_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) -c $(CFLAGS) $< -o $@
-
-$(BUILD_DIR)/%.o: %.s
-	@mkdir -p $(dir $@)
-	$(AS) -c $(CFLAGS) $< -o $@
-
-$(BIN): $(ELF)
-	$(OBJCOPY) -O binary $< $@
-
-$(HEX): $(ELF)
-	$(OBJCOPY) -O ihex $< $@
+# 强制重新配置（例如改了 CMakeLists / 工具链）
+configure:
+	$(CMAKE) -S . -B $(BUILD_DIR) \
+		-DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) \
+		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 
 clean:
+	$(CMAKE) --build $(BUILD_DIR) --target clean 2>/dev/null || true
+
+distclean:
 	rm -rf $(BUILD_DIR)
+
+bin: all
+	$(OBJCOPY) -O binary $(ELF) $(BIN)
+
+hex: all
+	$(OBJCOPY) -O ihex $(ELF) $(HEX)
+
+size: all
+	$(SIZE) $(ELF)
+
+openocd:
+	$(OPENOCD) -s $(CURDIR)/openocd -s $(OPENOCD_SCRIPTS) -f $(OPENOCD_CFG)
+
+flash: all
+	$(OPENOCD) -s $(CURDIR)/openocd -s $(OPENOCD_SCRIPTS) -f $(OPENOCD_CFG) \
+		-c "program $(ELF) verify reset exit"

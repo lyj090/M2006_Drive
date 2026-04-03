@@ -17,7 +17,7 @@
 #include "user_defination.h"
 
 
-void SerialTaskStart();
+void SerialTaskStart(void);
 
 
 #endif // !UART_SERIAL_H

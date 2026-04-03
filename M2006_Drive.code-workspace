@@ -5,13 +5,9 @@
         }
     ],
     "settings": {
-        "EIDE.SourceTree.AutoSearchIncludePath": true,
-        "EIDE.SourceTree.AutoSearchObjFile": true,
         "files.autoGuessEncoding": true,
-        "C_Cpp.default.configurationProvider": "cl.eide",
-        "C_Cpp.errorSquiggles": "Disabled",
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
         "files.associations": {
-            ".eideignore": "ignore",
             "*.h": "c",
             "*.c": "c",
             "*.hxx": "cpp",
@@ -25,20 +21,15 @@
             "editor.insertSpaces": true,
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
-        },
-        "EIDE.OpenOCD.ExePath": "/usr/local/bin/openocd"
+        }
     },
     "extensions": {
         "recommendations": [
-            "cl.eide",
-            "keroc.hex-fmt",
-            "xiaoyongdong.srecord",
-            "hars.cppsnippets",
-            "zixuanwang.linkerscript",
-            "redhat.vscode-yaml",
-            "IBM.output-colorizer",
+            "ms-vscode.cmake-tools",
+            "ms-vscode.cpptools",
+            "marus25.cortex-debug",
             "dan-c-underwood.arm",
-            "marus25.cortex-debug"
+            "redhat.vscode-yaml"
         ]
     }
 }

@@ -31,7 +31,7 @@ void lightTask()
 void lightTaskStart()
 {
     osThreadDef(light, lightTask, osPriorityNormal, 0, 512);
-	osThreadId lightTaskId = osThreadCreate(osThread(light), NULL);
+	osThreadCreate(osThread(light), NULL);
 }
 
 /**

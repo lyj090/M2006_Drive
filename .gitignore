@@ -1,6 +1,8 @@
 # dot dirs
 .vscode/launch.json
-.eide/log
+.vscode/.cortex-debug.registers.state.json
+.eide/
+.eide.usr.ctx.json
 .git
 .settings
 

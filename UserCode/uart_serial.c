@@ -101,7 +101,7 @@ void UartTransmitAll(DJI_Motor_s *Motor)
     }
     UartBag.crc += UartBag.slide_init;
 
-    HAL_UART_Transmit(&huart1, &UartBag, SEND_BAG_LENGTH, 10);
+    HAL_UART_Transmit(&huart1, (uint8_t *)&UartBag, SEND_BAG_LENGTH, 10);
 }
 
 void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
@@ -134,7 +134,7 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
         UartBag.crc += UartBag.data[i];
     }
     UartBag.crc += UartBag.slide_init;
-    HAL_UART_Transmit(&huart1, &UartBag, SEND_BAG_LENGTH, 10);
+    HAL_UART_Transmit(&huart1, (uint8_t *)&UartBag, SEND_BAG_LENGTH, 10);
 }
 
 /**
@@ -229,7 +229,7 @@ void DataPipeProcess()
  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    //usart6为上下位机通信所用串口
+    /* 与上位机协议：USART1（引脚见 Core/Src/usart.c / .ioc） */
     if(huart == &huart1)
     {
         // 将接收到的数据写入环形缓冲区
@@ -240,17 +240,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         }
         // 处理pipe数据并反馈当前位置信息
         DataPipeProcess();
-        HAL_UART_Receive_IT(&huart1, &RxBuffer, sizeof(RxBuffer));
+        HAL_UART_Receive_IT(&huart1, RxBuffer, sizeof(RxBuffer));
     }
 }
 
 /**
- * @brief uart初始化，开启uart6的中断
+ * @brief uart 初始化，开启 USART1 中断接收
  * 
  */
 void UART_INIT()
 {
-    HAL_UART_Receive_IT(&huart1, &RxBuffer, sizeof(RxBuffer));
+    HAL_UART_Receive_IT(&huart1, RxBuffer, sizeof(RxBuffer));
     HAL_UART_Transmit(&huart1, (uint8_t *)"UART_INIT", sizeof("UART_INIT"),1000);
 }
 
@@ -288,7 +288,7 @@ void SerialTask()
  * @brief 开启uart线程
  * 
  */
-void SerialTaskStart(mavlink_con)
+void SerialTaskStart(void)
 {
     osThreadDef(Serial, SerialTask, osPriorityNormal, 0, 512);
 	osThreadCreate(osThread(Serial), NULL);

@@ -79,7 +79,8 @@ void PID_Cal(PID_s *pid, float ref, float fdb)
  */
 void MotorCtrl()
 {
-    for(int i = 0; i < 4; i++)
+    int i;
+    for (i = 0; i < USE_MOTOR_NUM; i++)
     {
 #if MOTOR_CTRL_CURRENT_ONLY
         // 下位机仅执行电流限幅，上层负责MIT/PID控制律计算
@@ -132,6 +133,11 @@ void MotorCtrl()
             motor[i].current_out = 0;
         }
 #endif
+    }
+    /* CAN 帧固定四路 int16：未接入电机的通道强制 0，避免误控 */
+    for (; i < 4; i++)
+    {
+        motor[i].current_out = 0;
     }
 }
 

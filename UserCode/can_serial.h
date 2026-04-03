@@ -17,6 +17,6 @@
 
 #include "user_defination.h"
 
-void CanSerialTaskStart();
+void CanSerialTaskStart(void);
 
 #endif // !CAN_SERIAL_H

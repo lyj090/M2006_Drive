@@ -12,13 +12,13 @@
 
 | 方向 | 说明 |
 |------|------|
-| **上位机 → MCU** | **USART6** 中断接收固定格式数据包，解析为各电机的 `angle_ref` / `rpm_ref` / `current_ref`。 |
+| **上位机 → MCU** | **USART1**（默认 **PA9** TX、**PB7** RX，以 `M2006_Drive.ioc` / `Core/Src/usart.c` 为准）中断接收固定格式数据包，解析为各电机的 `angle_ref` / `rpm_ref` / `current_ref`。 |
 | **MCU → 电机** | **CAN1** 周期发送 **标准帧 ID `0x200`**、8 字节payload：4 路 `int16` 电流指令（与 C610 类控制帧一致；代码注释按四路编写，默认参与闭环电机数为 `USE_MOTOR_NUM`）。 |
 | **电机 → MCU** | CAN 接收 **ID `0x201` 起**，第 *i* 路为 `0x201 + i`，解析角度、转速、力矩等反馈，并结合 M2006 **减速比 36**、反馈角度量程（代码中按 **8191** 作为单圈刻度参与推算，见 `UpdataMotor` 注释）做圈数累积与输出轴角度。 |
-| **MCU → 上位机** | **USART6** 按固定频率上行反馈包（电机 id、角度、转速、力矩）。 |
-| **调试** | `printf` 重定向到 **UART8**（便于接 USB 转串口看日志）。 |
+| **MCU → 上位机** | **USART1** 按固定频率上行反馈包（电机 id、角度、转速、力矩）；收到合法下行包时也会回传当前状态。 |
+| **调试** | `printf` 经 `syscalls.c` 中 weak **`__io_putchar`**；若未在工程中实现，则无实际 UART 输出，可按需接到某一 USART。 |
 
-运行时基于 **FreeRTOS**：`main` 完成 HAL 与 **USART6 / UART8 / CAN1 / GPIO** 初始化后启动调度；在 `freertos.c` 的 `USER_INIT()` 里创建用户任务。
+运行时基于 **FreeRTOS**：`main` 完成 HAL 与 **USART1 / CAN1 / GPIO** 等初始化后启动调度；在 `freertos.c` 的 `USER_INIT()` 里创建用户任务。
 
 ---
 
@@ -27,9 +27,9 @@
 ```
 USER_INIT()  [user_init.c]
   ├─ MOTOR_INIT()           [user_defination.c]  PID 参数与电机结构体初值
-  ├─ lightTaskStart()       指示灯：GPIOF14 约 500 ms 翻转（便于确认板子在跑）
+  ├─ lightTaskStart()       指示灯：**GPIOH PIN10** 约 **1 s** 翻转（便于确认板子在跑）
   ├─ CanSerialTaskStart()   CAN 收发与闭环、下发电流
-  └─ SerialTaskStart()      USART6 上报反馈、解析控制包
+  └─ SerialTaskStart()      USART1 上报反馈、解析控制包
 ```
 
 | 模块 | 文件 | 作用 |
@@ -43,13 +43,17 @@ USER_INIT()  [user_init.c]
 
 ## 控制逻辑摘要
 
-- **位置模式**：`angle_ref != -1` 时，先角度环 PID（输出作转速环给定），再转速环 PID，输出作为 `current_out`（内部按输出轴/电机轴做了与减速比相关的换算）。  
-- **速度模式**：`rpm_ref != -1`（且位置指令为 -1）时，仅转速环。  
-- **电流模式**：`current_ref != -1`（且前两者为 -1）时，电流在给定范围内直通（仍受 `rpm_pid` 的 output 限幅约束）。  
-- **无效/空闲**：三者均为 -1 时输出电流为 0。  
-- **位置保护**：对 `MOTOR_IS_POS[i] == 1` 的轴，若 `globalAngle.angleAll` 超出 `MOTOR_MIN[i]..MOTOR_MAX[i]`，将 `current_out` 置 0。
+以 **`UserCode/user_defination.h`** 中 **`MOTOR_CTRL_CURRENT_ONLY`** 为准：
 
-默认宏 **`USE_MOTOR_NUM`** 为 **3**（与 `MOTOR_IS_POS` 等数组一致）；`motor[]` 仍保留 4 元素以匹配四路 CAN 电流帧，第 4 路是否使用需与硬件一致。
+- **`MOTOR_CTRL_CURRENT_ONLY == 1`（当前默认）**：下位机仅对 **`current_ref`** 做 ±**`M2006_CURRENT_MAX`** 限幅后作为 `current_out`；位置/速度环由上位机完成。  
+- **`MOTOR_CTRL_CURRENT_ONLY == 0`**：下位机三环逻辑如下：  
+  - **位置模式**：`angle_ref != -1` 时，先角度环 PID（输出作转速环给定），再转速环 PID，输出作为 `current_out`（内部按输出轴/电机轴做了与减速比相关的换算）。  
+  - **速度模式**：`rpm_ref != -1`（且位置指令为 -1）时，仅转速环。  
+  - **电流模式**：`current_ref != -1`（且前两者为 -1）时，电流在给定范围内直通（仍受 `rpm_pid` 的 output 限幅约束）。  
+  - **无效/空闲**：三者均为 -1 时输出电流为 0。  
+- **位置保护**（CAN 任务内）：对 `MOTOR_IS_POS[i] == 1` 的轴，若 `globalAngle.angleAll` 超出 `MOTOR_MIN[i]..MOTOR_MAX[i]`，将 `current_out` 置 0。
+
+**`USE_MOTOR_NUM`** 须与 **`MOTOR_IS_POS` / `MOTOR_MIN` / `MOTOR_MAX`** 数组长度一致（**以 `user_defination.h` 当前值为准**）；`motor[]` 固定 **4** 元素以匹配 **CAN 四路电流帧**，**未使用通道的电流在 `MotorCtrl` 中强制为 0**，避免误控未接电调的路。
 
 ---
 
@@ -80,27 +84,28 @@ USER_INIT()  [user_init.c]
 
 ## 编译与烧录（Linux）
 
-工程根目录提供 **`Makefile`**，可在 **`build/`** 下生成 `M2006_Drive.elf` / `.bin` / `.hex`。命令与如何判断编译成功、OpenOCD 烧录步骤见 **`arm_make.md`**。
+**编译**以根目录 **CMake**（**`CMakeLists.txt`** + **`cmake/gcc-arm-none-eabi.cmake`**）为准；根目录 **`Makefile`** 仅包装 **`cmake` 配置/构建**，默认产物 **`build/M2006_Drive.elf`**。需要 **`.bin`/`.hex`** 时在成功编译后执行 **`make bin`** / **`make hex`**。**一键烧录**：**`make flash`**（内部先构建再调用 **`openocd/m2006_drive.cfg`** + ST-Link）。完整说明见 **`arm_make.md`**。
 
 ```bash
 cd /path/to/M2006_Drive
 make -j"$(nproc)"
+make flash
 ```
 
-亦可使用 **STM32CubeIDE** 打开 **`STM32CubeIDE/`** 目录下工程（注意将 `UserCode` 源文件与包含路径加入工程，与 Makefile 保持一致）。
+若要用图形化工具改时钟与引脚，可用 **STM32CubeMX** 打开根目录 **`M2006_Drive.ioc`**，生成代码时选择 **CMake** 工具链，并在生成后把 **`UserCode`** 源文件与包含路径合并回根目录 **`CMakeLists.txt`**（与当前 **`target_sources`** 一致）。
 
 ---
 
-## 现象：烧录后按复位灯不闪（`lightTask` 在 **PF14**）
+## 现象：烧录后按复位灯不闪（`lightTask` 使用 **GPIOH PIN10**）
 
-闪灯在 **`USER_INIT()` → `lightTaskStart()`** 里，约 **500 ms** 翻转 **GPIOF 14**。若**完全没有**闪烁，常见原因：
+闪灯在 **`USER_INIT()` → `lightTaskStart()`** 里，约 **1 s** 翻转 **GPIOH 10**（另见 `user_init.c` 中对 PH10/11/12 的初始化）。若**完全没有**闪烁，常见原因：
 
 | 原因 | 说明 |
 |------|------|
 | **HSE 未起振** | 原工程假定 **外置 12 MHz**（见 `M2006_Drive.ioc` / `HSE_VALUE`）。无晶振或焊接异常时，`HAL_RCC_OscConfig` 会失败并进入 **`Error_Handler()`** 死循环，**到不了 FreeRTOS**，灯不会闪。当前 **`main.c`** 已增加 **HSE 失败则自动改用 HSI+PLL（仍为 180 MHz）**，请重新 **`make` 并烧录**再试。 |
 | **晶振频率不是 12 MHz** | 若实际是 **8 MHz** 等，应改 `PLL_M` / `HSE_VALUE` 与硬件一致；否则会全时基错误，严重时也可能初始化异常。 |
-| **LED 不在 PF14** | 若你用的不是原 A 板原理图，LED 可能在别的引脚；用万用表或原理图核对，或临时在 `main` 里对自己板子的 LED 脚做翻转试验。 |
-| **CAN 收异常帧进 `Error_Handler`** | `can_serial.c` 中若收到 **StdId 不是 `0x201…` 且被解析成非法 `id`** 会 **`Error_Handler()`**。表现为可能闪几下再死或立刻死。调试阶段可断开 CAN 总线_noise 或暂时改宽松 RX 逻辑。 |
+| **LED 不在 PH10** | 若你用的不是当前 `user_init.c` 所接引脚，灯可能在别的 GPIO；用万用表或原理图核对，或临时在 `lightTask` 里改为自己板子的 LED 脚。 |
+| **其它 `Error_Handler`** | 例如 **`HAL_CAN_GetRxMessage` 失败**、**`HAL_CAN_AddTxMessage` 失败** 等仍会进入 **`Error_Handler()`**；CAN 上 **非 `0x201…` 的无关标准帧已改为忽略**，不再因此复位死机。 |
 
 排查建议：`gdb-multiarch` 连 OpenOCD，在 **`Error_Handler`**、`SystemClock_Config` 返回后、`USER_INIT` 处下断点，看卡在哪一步。
 
