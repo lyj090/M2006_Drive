@@ -18,14 +18,11 @@
 
 
 #define CAN_SERIAL_FREQUENCY 500
-#define UART_SERIAL_FREQUENCY 100
+#define UART_SERIAL_FREQUENCY 200
 
 #define USE_MOTOR_NUM 2
 #define M2006_CURRENT_MAX 10000
 #define M2006_KT 0.18
-// 1: 仅电流模式（上位机做MIT/PID），0: 保留本地下位机三环逻辑
-#define MOTOR_CTRL_CURRENT_ONLY 1
-
 
 extern int MOTOR_IS_POS[USE_MOTOR_NUM];
 extern float MOTOR_MIN[USE_MOTOR_NUM];

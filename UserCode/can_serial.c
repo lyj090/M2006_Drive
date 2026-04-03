@@ -22,96 +22,102 @@
  */
 void CanTransmitMotor0123(int16_t motor0_Iq, int16_t motor1_Iq, int16_t motor2_Iq, int16_t motor3_Iq)
 {
-    CAN_TxHeaderTypeDef TxMessage;
+    /* HAL 必须写入邮箱掩码；传 NULL 会对地址 0 解引用，导致 HardFault，表现为 CAN 完全无收发 */
+    CAN_TxHeaderTypeDef TxMessage = {
+        .StdId = 0x200,
+        .ExtId = 0,
+        .IDE = CAN_ID_STD,
+        .RTR = CAN_RTR_DATA,
+        .DLC = 8,
+        .TransmitGlobalTime = DISABLE,
+    };
+    uint32_t txMailbox = 0;
+    uint8_t TxData[8] = {
+        (uint8_t)(motor0_Iq >> 8), (uint8_t)motor0_Iq,
+        (uint8_t)(motor1_Iq >> 8), (uint8_t)motor1_Iq,
+        (uint8_t)(motor2_Iq >> 8), (uint8_t)motor2_Iq,
+        (uint8_t)(motor3_Iq >> 8), (uint8_t)motor3_Iq,
+    };
 
-    TxMessage.DLC=0x08;
-	TxMessage.StdId= 0x200;
-	TxMessage.IDE=CAN_ID_STD;
-	TxMessage.RTR=CAN_RTR_DATA;
-
-    uint8_t TxData[8] = {0};
-    TxData[0] = (motor0_Iq >> 8);
-	TxData[1] = motor0_Iq;
-	TxData[2] = (motor1_Iq >> 8);
-	TxData[3] = motor1_Iq;
-	TxData[4] = (motor2_Iq >> 8);
-	TxData[5] = motor2_Iq;
-	TxData[6] = (motor3_Iq >> 8);
-	TxData[7] = motor3_Iq;
-
-	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) ;
-	if(HAL_CAN_AddTxMessage(&hcan1,&TxMessage,TxData, 0)!=HAL_OK)
-	{
-        Error_Handler();       
-	}
+    while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
+    }
+    if (HAL_CAN_AddTxMessage(&hcan1, &TxMessage, TxData, &txMailbox) != HAL_OK) {
+        Error_Handler();
+    }
 }
 
 /**
- * @brief 将can通信消息转化成电机信息
- * 
- * @param Motor 
- * @param CanData 
+ * @brief 从 CAN payload 解析转速、力矩、转子机械角（与 MotorCtrl 模式无关）
+ * C610 反馈：角 0~8191 为 uint16（大端），转速/力矩为 int16（大端），与官方例程一致。
  */
-void UpdataMotor(DJI_Motor_s *Motor, uint8_t *CanData)
+static void Motor_ApplyCanPayload(DJI_Motor_s *Motor, const uint8_t *CanData)
 {
-    
-    Motor->FdbData.angle = (int16_t)(CanData[0] << 8 | CanData[1]);
-    Motor->AxisData.axisRpm = (int16_t)(CanData[2] << 8 | CanData[3]);
-    Motor->FdbData.torque = (int16_t)(CanData[4] << 8 | CanData[5]);
+    uint16_t enc = (uint16_t)(((uint16_t)CanData[0] << 8) | (uint16_t)CanData[1]);
+    Motor->FdbData.angle = (float)enc;
+    Motor->AxisData.axisRpm =
+        (float)(int16_t)(((uint16_t)CanData[2] << 8) | (uint16_t)CanData[3]);
+    Motor->FdbData.torque =
+        (float)(int16_t)(((uint16_t)CanData[4] << 8) | (uint16_t)CanData[5]);
+    Motor->FdbData.rpm = Motor->AxisData.axisRpm / 36.0f;
+}
 
-    //M2006减速比为36
-    Motor->FdbData.rpm = Motor->AxisData.axisRpm/36.0;
-
-    //M2006转子转一圈（360）对应的返回值为8191
-    // 多圈识别，防止编码器回零跳变
+/**
+ * @brief 多圈角度展开（依赖已写入的 FdbData.angle）
+ * M2006 转子单圈刻度 8191，输出轴角度 = 转子累计角 / 36
+ */
+static void UpdataMotorAngleUnwrap(DJI_Motor_s *Motor)
+{
     float delta = Motor->FdbData.angle - Motor->globalAngle.angleLast;
-    if(delta > ENCODER_JUMP_THRESHOLD) {
+    if (delta > ENCODER_JUMP_THRESHOLD) {
         Motor->globalAngle.round--;
-    } else if(delta < -ENCODER_JUMP_THRESHOLD) {
+    } else if (delta < -ENCODER_JUMP_THRESHOLD) {
         Motor->globalAngle.round++;
     }
-    Motor->AxisData.axisAngleAll = (Motor->FdbData.angle + Motor->globalAngle.round * 8191.0 - Motor->globalAngle.angleOffset)/8191.0*360;
-    Motor->globalAngle.angleAll = Motor->AxisData.axisAngleAll/36.0;
-
+    Motor->AxisData.axisAngleAll =
+        (Motor->FdbData.angle + (float)Motor->globalAngle.round * 8191.0f - Motor->globalAngle.angleOffset) / 8191.0f * 360.0f;
+    Motor->globalAngle.angleAll = Motor->AxisData.axisAngleAll / 36.0f;
     Motor->globalAngle.angleLast = Motor->FdbData.angle;
 }
 
+/**
+ * @brief 处理一路电调反馈（中断与轮询共用）
+ */
+static void Motor_OnEscFeedback(int index, const uint8_t *CanData)
+{
+    if (index < 0 || index >= USE_MOTOR_NUM) {
+        return;
+    }
+    DJI_Motor_s *m = &motor[index];
+    Motor_ApplyCanPayload(m, CanData);
+    /* 首帧对齐 offset，之后每帧展开多圈；去掉“第 20 帧再对齐”以免周期跳变 */
+    if (m->FdbData.msg_cnt == 0) {
+        m->globalAngle.angleOffset = m->FdbData.angle;
+        m->globalAngle.angleLast = m->FdbData.angle;
+        m->globalAngle.round = 0;
+        m->FdbData.msg_cnt = 1;
+    }
+    UpdataMotorAngleUnwrap(m);
+}
 
 /**
- * @brief can通信Callback
- * 
- * @param hcan 
+ * @brief 轮询 RX FIFO0（补充 NVIC 偶发丢中断、或高负载时积压）
  */
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+static void CAN_PollRxFifo0(void)
 {
     CAN_RxHeaderTypeDef RxHeader;
-    uint8_t CanReceiveData[8] = {0};
-    if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, CanReceiveData) != HAL_OK)
-    {   
-        Error_Handler();     
+    uint8_t d[8];
+    while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0) {
+        if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, d) != HAL_OK) {
+            break;
+        }
+        Motor_OnEscFeedback((int)RxHeader.StdId - 0x201, d);
     }
+}
 
-    int id = RxHeader.StdId - 0x201;
-    if(id >= 0 && id < USE_MOTOR_NUM)
-    {
-        //获取绝对编码器的初始值
-        if(motor[id].FdbData.msg_cnt < 20)
-        {
-            motor[id].globalAngle.angleOffset = (int16_t)(CanReceiveData[0] << 8 | CanReceiveData[1]);
-            motor[id].FdbData.msg_cnt++;
-        }
-        else if(motor[id].FdbData.msg_cnt == 20)
-        {
-            motor[id].globalAngle.angleOffset = (int16_t)(CanReceiveData[0] << 8 | CanReceiveData[1]);
-            motor[id].FdbData.msg_cnt++;
-            motor[id].globalAngle.angleLast = motor[id].globalAngle.angleOffset;
-        }
-        else
-        {
-            UpdataMotor(&motor[id], CanReceiveData);
-        }
-    }
-    /* 总线上其它标准帧（非本机电调反馈）直接忽略，避免误进 Error_Handler */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    (void)hcan;
+    CAN_PollRxFifo0();
 }
 
 
@@ -133,9 +139,15 @@ void CAN_INIT()
     sFilterConfig.FilterActivation = ENABLE;
     sFilterConfig.SlaveStartFilterBank = 14;
 
-    HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig);
-    HAL_CAN_Start(&hcan1);
-    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+    if (HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK) {
+        Error_Handler();
+    }
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+        Error_Handler();
+    }
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
+        Error_Handler();
+    }
 }
 
 /**
@@ -150,6 +162,8 @@ void CanSerialTask(void const *argument)
 
     for(;;)
     {
+        /* 与 RX0 中断同逻辑，避免仅靠中断时丢帧导致角度/转速不刷新 */
+        CAN_PollRxFifo0();
         MotorCtrl();
         //位置保护，输出保护
         for(int i = 0; i < USE_MOTOR_NUM; i++)

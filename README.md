@@ -36,22 +36,22 @@ USER_INIT()  [user_init.c]
 |------|------|------|
 | 电机与 PID | `UserCode/user_defination.c`、`user_defination.h` | 数据结构、`MOTOR_INIT`、`MotorCtrl`（位置/速度/电流三种伺服）、`PID_Cal`、限位数组 |
 | CAN 协议与线程 | `UserCode/can_serial.c`、`can_serial.h` | `CAN_INIT`、`CanTransmitMotor0123`、`HAL_CAN_RxFifo0MsgPendingCallback`、`CanSerialTask`（含位置保护） |
-| 串口协议与线程 | `UserCode/uart_serial.c`、`uart_serial.h` | 包头 `0x44 0x22`、收包解析写 `motor[id].RefData`、周期 `UartTransmit` |
+| 串口协议与线程 | `UserCode/uart_serial.c`、`uart_serial.h` | 包头 `0x44 0x22`、收包解析写 `motor[id].RefData`；**`SerialTask` 按 `UART_SERIAL_FREQUENCY` 周期 `UartTransmitAll` 上送 CAN 反馈（角度/转速/力矩），与控制模式无关** |
 | 任务入口 | `UserCode/user_init.c`、`user_init.h` | `USER_INIT()`，汇总启动上述线程 |
 
 ---
 
 ## 控制逻辑摘要
 
-以 **`UserCode/user_defination.h`** 中 **`MOTOR_CTRL_CURRENT_ONLY`** 为准：
+下位机 **`MotorCtrl()`**（`user_defination.c`）根据串口写入的 **`RefData`** **自动选择**控制方式，**无需编译开关**：
 
-- **`MOTOR_CTRL_CURRENT_ONLY == 1`（当前默认）**：下位机仅对 **`current_ref`** 做 ±**`M2006_CURRENT_MAX`** 限幅后作为 `current_out`；位置/速度环由上位机完成。  
-- **`MOTOR_CTRL_CURRENT_ONLY == 0`**：下位机三环逻辑如下：  
-  - **位置模式**：`angle_ref != -1` 时，先角度环 PID（输出作转速环给定），再转速环 PID，输出作为 `current_out`（内部按输出轴/电机轴做了与减速比相关的换算）。  
-  - **速度模式**：`rpm_ref != -1`（且位置指令为 -1）时，仅转速环。  
-  - **电流模式**：`current_ref != -1`（且前两者为 -1）时，电流在给定范围内直通（仍受 `rpm_pid` 的 output 限幅约束）。  
-  - **无效/空闲**：三者均为 -1 时输出电流为 0。  
-- **位置保护**（CAN 任务内）：对 `MOTOR_IS_POS[i] == 1` 的轴，若 `globalAngle.angleAll` 超出 `MOTOR_MIN[i]..MOTOR_MAX[i]`，将 `current_out` 置 0。
+- **优先级**：**位置**（`angle_ref != -1`）**>** **速度**（`rpm_ref != -1`）**>** **电流**（`current_ref != -1`）；未参与控制的字段请发 **`-1`**。  
+- **位置模式**：角度环 PID → 转速环 PID → `current_out`（内部含输出轴/电机轴与减速比 **36** 的换算）。  
+- **速度模式**：仅转速环 PID。  
+- **电流模式**：`current_out` 直接跟踪 **`current_ref`**，限幅为 ±**`M2006_CURRENT_MAX`**。  
+- **空闲**：三者均为 **`-1`** 时 **`current_out = 0`**。  
+- **串口侧**：若 **`angle` 字段 ≠ -1**（表示使用位置参考）且超出 **`MOTOR_MIN` / `MOTOR_MAX`**，该电机本包不更新参考；纯速度/纯电流时 **`angle` 槽请发 -1**（见 `uart_serial.c`）。  
+- **位置保护**（CAN 任务内）：对 **`MOTOR_IS_POS[i] == 1`** 的轴，若 **`globalAngle.angleAll`** 超出软限位且运动方向继续远离限位，将 **`current_out` 置 0**。
 
 **`USE_MOTOR_NUM`** 须与 **`MOTOR_IS_POS` / `MOTOR_MIN` / `MOTOR_MAX`** 数组长度一致（**以 `user_defination.h` 当前值为准**）；`motor[]` 固定 **4** 元素以匹配 **CAN 四路电流帧**，**未使用通道的电流在 `MotorCtrl` 中强制为 0**，避免误控未接电调的路。
 
@@ -64,7 +64,7 @@ USER_INIT()  [user_init.c]
 - `id`：电机序号  
 - 三个 **float**：依次为角度参考、转速参考、电流参考（具体字段名见 `RECV_Bag_u` / `SEND_Bag_u`）
 
-上行反馈结构对称，用于把 `angle_fdb`、`rpm_fdb`、`torque_fdb` 发回上位机。
+上行包与下行布局对称，字段为 **CAN 实测**：`angle_fdb`→`globalAngle.angleAll`，`rpm_fdb`→`FdbData.rpm`（输出轴），`torque_fdb`→`FdbData.torque`；由 **`SerialTask` 固定频率发送**，不依赖是否收到下行指令。
 
 线程频率相关宏：**`UART_SERIAL_FREQUENCY`**、**`CAN_SERIAL_FREQUENCY`**（见 `user_defination.h`）。
 

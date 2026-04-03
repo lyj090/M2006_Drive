@@ -23,9 +23,10 @@ void MOTOR_INIT()
     {
         motor[i].id = i;
         motor[i].globalAngle.round = 0;
-        motor[i].RefData.angle_ref = 0;
-        motor[i].RefData.rpm_ref = 0;
-        motor[i].RefData.current_ref = 0;
+        motor[i].FdbData.msg_cnt = 0;
+        motor[i].RefData.angle_ref = -1.f;
+        motor[i].RefData.rpm_ref = -1.f;
+        motor[i].RefData.current_ref = -1.f;
 
         motor[i].PID.angle_pid.Kp = 5.5;
         motor[i].PID.angle_pid.Ki = 0.35;
@@ -82,57 +83,26 @@ void MotorCtrl()
     int i;
     for (i = 0; i < USE_MOTOR_NUM; i++)
     {
-#if MOTOR_CTRL_CURRENT_ONLY
-        // 下位机仅执行电流限幅，上层负责MIT/PID控制律计算
-        float i_ref = motor[i].RefData.current_ref;
-        if(i_ref > M2006_CURRENT_MAX)
-        {
-            motor[i].current_out = M2006_CURRENT_MAX;
-        }
-        else if(i_ref < -M2006_CURRENT_MAX)
-        {
-            motor[i].current_out = -M2006_CURRENT_MAX;
-        }
-        else
-        {
-            motor[i].current_out = i_ref;
-        }
-#else
-        //位置伺服
-        if(motor[i].RefData.angle_ref!=-1)
-        {
-            PID_Cal(&motor[i].PID.angle_pid, motor[i].RefData.angle_ref * 36.0, motor[i].AxisData.axisAngleAll);
+        /* 按串口下发的参考量自动选模式：位置 > 速度 > 电流；未使用字段填 -1 */
+        if (motor[i].RefData.angle_ref != -1.f) {
+            PID_Cal(&motor[i].PID.angle_pid, motor[i].RefData.angle_ref * 36.0f, motor[i].AxisData.axisAngleAll);
             PID_Cal(&motor[i].PID.rpm_pid, motor[i].PID.angle_pid.output, motor[i].AxisData.axisRpm);
             motor[i].current_out = motor[i].PID.rpm_pid.output;
-        }
-        //速度伺服
-        else if(motor[i].RefData.rpm_ref!=-1)
-        {
-            PID_Cal(&motor[i].PID.rpm_pid, motor[i].RefData.rpm_ref * 36.0, motor[i].AxisData.axisRpm);
+        } else if (motor[i].RefData.rpm_ref != -1.f) {
+            PID_Cal(&motor[i].PID.rpm_pid, motor[i].RefData.rpm_ref * 36.0f, motor[i].AxisData.axisRpm);
             motor[i].current_out = motor[i].PID.rpm_pid.output;
-        }
-        //电流控制
-        else if(motor[i].RefData.current_ref!=-1)
-        {
-            if(motor[i].RefData.current_ref>motor[i].PID.rpm_pid.outputMax)
-            {
-                motor[i].current_out = motor[i].PID.rpm_pid.outputMax;
+        } else if (motor[i].RefData.current_ref != -1.f) {
+            float i_ref = motor[i].RefData.current_ref;
+            if (i_ref > M2006_CURRENT_MAX) {
+                motor[i].current_out = (float)M2006_CURRENT_MAX;
+            } else if (i_ref < -(float)M2006_CURRENT_MAX) {
+                motor[i].current_out = -(float)M2006_CURRENT_MAX;
+            } else {
+                motor[i].current_out = i_ref;
             }
-            else if(motor[i].RefData.current_ref<motor[i].PID.rpm_pid.outputMin)
-            {
-                motor[i].current_out = motor[i].PID.rpm_pid.outputMin;
-            }
-            else
-            {
-                motor[i].current_out = motor[i].RefData.current_ref;
-            }
-        }
-        //无控制信号传入
-        else
-        {
+        } else {
             motor[i].current_out = 0;
         }
-#endif
     }
     /* CAN 帧固定四路 int16：未接入电机的通道强制 0，避免误控 */
     for (; i < 4; i++)

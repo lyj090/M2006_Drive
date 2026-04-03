@@ -10,6 +10,7 @@
  */
 
 #include "uart_serial.h"
+#include "main.h"
 
 // 通信包各个部分长度定义
 #define HEAD_LENGTH 2
@@ -84,12 +85,20 @@ void UartTransmitAll(DJI_Motor_s *Motor)
     UartBag.header[1] = HEADER[1];
     UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH;
 
-    for(int i = 0; i < USE_MOTOR_NUM; ++i)
-    {
-        UartBag.motor_data_struct[i].id = Motor[i].id;
-        UartBag.motor_data_struct[i].angle_fdb = Motor[i].globalAngle.angleAll;
-        UartBag.motor_data_struct[i].rpm_fdb = Motor[i].FdbData.rpm;
-        UartBag.motor_data_struct[i].torque_fdb = Motor[i].FdbData.torque;
+    /* 关中断快照，避免与 CAN 接收回调并发读写 float 撕裂 */
+    for (int i = 0; i < USE_MOTOR_NUM; ++i) {
+        float ang, rpm, tq;
+        uint8_t mid;
+        __disable_irq();
+        mid = Motor[i].id;
+        ang = Motor[i].globalAngle.angleAll;
+        rpm = Motor[i].FdbData.rpm;
+        tq = Motor[i].FdbData.torque;
+        __enable_irq();
+        UartBag.motor_data_struct[i].id = mid;
+        UartBag.motor_data_struct[i].angle_fdb = ang;
+        UartBag.motor_data_struct[i].rpm_fdb = rpm;
+        UartBag.motor_data_struct[i].torque_fdb = tq;
     }
 
     UartBag.slide_init = slide_init_signal[0];
@@ -192,21 +201,18 @@ void DataPipeProcess()
                     }
                     MotorData_t *motorData = (MotorData_t *)temp;
                     if (motorData->id < USE_MOTOR_NUM) {
-#if !MOTOR_CTRL_CURRENT_ONLY
-                        // 位置保护，输入保护，限制输入在范围内
-                        if(motorData->angle_fdb > MOTOR_MAX[motorData->id] || motorData->angle_fdb < MOTOR_MIN[motorData->id])
-                        {
-                            // 不修改ref
+                        /* 仅当使用位置参考（≠-1）时校验软限位；速度/电流模式角度槽应发 -1，避免误拒收 */
+                        if (motorData->angle_fdb != -1.f &&
+                            (motorData->angle_fdb > MOTOR_MAX[motorData->id] ||
+                             motorData->angle_fdb < MOTOR_MIN[motorData->id])) {
                             continue;
                         }
-#endif
                         motor[motorData->id].RefData.angle_ref = motorData->angle_fdb;
                         motor[motorData->id].RefData.rpm_ref = motorData->rpm_fdb;
                         motor[motorData->id].RefData.current_ref = motorData->torque_fdb;
                     }
                 }
-                // UartTransmitDEBUG(motor,0);
-                UartTransmitAll(motor);
+                /* 反馈由 SerialTask 固定周期上送，避免在中断路径里 HAL_UART_Transmit 阻塞 */
                 // 跳过已处理的数据包
                 DataPipePop(&data_pipe,total_packet_len);
                 // 清空串口缓存区
@@ -262,25 +268,19 @@ void SerialTask()
 {
     UART_INIT();
 
-    for(;;)
-    {
-        // time management TODO: 这里的延时可以改成更精确的时间管理
-        // 注释该循环无法进入中断
-        // UartTransmitAll(motor);
-
-        // --- 滑块初始化信号处理 ---
-        for(int i = SLIDE_INIT_SIGNAL_LENGTH - 1; i > 0; --i)
-            slide_init_signal[i] = slide_init_signal[i-1];
-        // 红外限位传感器：到达限位输出低电平，反转后1表示到达限位
+    for (;;) {
+        /* 滑块/限位历史，供上行包 slide_init 使用 */
+        for (int i = SLIDE_INIT_SIGNAL_LENGTH - 1; i > 0; --i) {
+            slide_init_signal[i] = slide_init_signal[i - 1];
+        }
         uint8_t limit_reached = GPIO_PIN_SET - HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
         slide_init_signal[0] = limit_reached;
-        HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, limit_reached); // 指示灯同步
-        // 一次触及限位信号时发送一次
-        if(limit_reached && slide_init_signal[1] && !slide_init_signal[2]) {
-            UartTransmitAll(motor);
-        }
+        HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, limit_reached);
 
-        osDelay(1000 / (float)UART_SERIAL_FREQUENCY);        
+        /* 固定频率上送：位置/转速/力矩均来自 CAN 反馈，与控制模式无关 */
+        UartTransmitAll(motor);
+
+        osDelay(1000 / (float)UART_SERIAL_FREQUENCY);
     }
 }
 

@@ -1,5 +1,7 @@
 # Linux 下编译与烧录说明（ARM / STM32）
 
+使用 **STM32CubeMX** 生成代码时请选择 **CMake** 工具链（详见 **§0.4**）。
+
 **主构建方式**：根目录 **`CMakeLists.txt`**（CubeMX 生成）+ 工具链 **`cmake/gcc-arm-none-eabi.cmake`**。根目录 **`Makefile`** 仅为薄封装：内部执行 **`cmake -S . -B <构建目录>`** 与 **`cmake --build`**，并提供 **`flash`** / **`openocd`** 等入口。
 
 | 项目 | 说明 |
@@ -12,13 +14,56 @@
 
 ---
 
+## 0. 需要安装与下载的内容
+
+下面按「本仓库已自带 / 须自行准备」区分。固件源码与 **HAL、CMSIS、FreeRTOS** 等已在仓库 **`Drivers/`**、**`Middlewares/`** 中，**按本文编译烧录时不必再从 ST 单独下载这些库**。
+
+### 0.1 必装：系统软件（Linux）
+
+| 用途 | 软件包 / 命令 | 说明 |
+|------|----------------|------|
+| 构建入口 | **`make`** | 根目录 **`Makefile`** 调用 CMake。 |
+| 配置与生成构建文件 | **`cmake`** | 版本 **≥ 3.22**（与根目录 **`CMakeLists.txt`** 一致）。 |
+| 交叉编译 | **`gcc-arm-none-eabi`**（提供 **`arm-none-eabi-gcc`**、**`objcopy`**、**`size`** 等） | 与 **`cmake/gcc-arm-none-eabi.cmake`** 配套。 |
+| 烧录 / 调试桥 | **`openocd`** | 常见发行版为 **0.10.x**；**`make flash`**、**`make openocd`** 依赖它。 |
+
+**Debian / Ubuntu** 示例（一次性安装）：
+
+```bash
+sudo apt update
+sudo apt install -y make cmake gcc-arm-none-eabi openocd
+cmake --version   # 确认 ≥ 3.22
+```
+
+其它发行版请用对应包管理器安装同名或等价包；**`cmake`** 过旧时可从 [Kitware 官方仓库](https://apt.kitware.com/) 或 [cmake.org](https://cmake.org/download/) 安装较新版本。
+
+### 0.2 可选软件
+
+| 用途 | 软件 | 说明 |
+|------|------|------|
+| GDB 调试 | **`gdb-multiarch`** 或 **`gdb-arm-none-eabi`** | 配合 **`make openocd`**，连接 **`localhost:3333`**。 |
+| 使用 **CMake Presets**（**`CMakePresets.json`**）且生成器为 Ninja | **`ninja`** | 仅用根目录 **`make`** 时默认多为 **Unix Makefiles**，可不装。 |
+| 用 **`st-flash`** 写 **`.bin`** | **`stlink-tools`** | 与 OpenOCD 二选一即可烧录；见 **§3.4**。 |
+
+### 0.3 硬件
+
+- **调试器**：**ST-Link**（常见为 **V2** 或 **V2-1**），**USB** 连接 PC；若 **`openocd`** 报无设备，检查线材、供电及 **udev 权限**（部分系统需规则文件才能非 root 访问）。
+- **目标板**：与当前固件芯片一致（本仓库 CMake 默认可构建为 **STM32F407** 配置），并可靠供电。
+
+### 0.4 工程与可选工具
+
+| 内容 | 是否需要下载 | 说明 |
+|------|----------------|------|
+| **本仓库** | 是 | **`git clone`** 或下载源码包即可；无需再下 HAL 压缩包。 |
+| **STM32CubeMX** | 改 **`M2006_Drive.ioc`** 时需要 | 从 [ST 官网](https://www.st.com/en/development-tools/stm32cubemx.html) 安装；仅编译已有代码可不装。 |
+
+---
+
 ## 1. 推荐：烧录流程（`make` 包装 CMake + ST-Link）
 
 ### 1.1 依赖
 
-- **`make`**、**`arm-none-eabi-gcc`**（如 `sudo apt install make gcc-arm-none-eabi`）
-- **`openocd`**（如 `sudo apt install openocd`，常见为 **0.10.x**）
-- 调试器：**ST-Link**（USB），目标板供电正常
+与 **§0** 一致：**`make`**、**`cmake`（≥3.22）**、**`gcc-arm-none-eabi`**、**`openocd`**，以及 **ST-Link** 与目标板供电正常。
 
 ### 1.2 编译并烧录
 
