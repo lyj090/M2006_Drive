@@ -16,16 +16,14 @@
 #define HEAD_LENGTH 2
 #define DATA_NUM_LENGTH 1
 #define MOTOR_DATA_LENGTH 13
-#define SLIDE_INIT_LENGTH 1 //上行数据有，下行数据无
 #define CRC_LENGTH 1
 // crc校验不包括数据头
-#define SEND_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH)
-#define RECV_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH)
+#define SEND_BAG_LENGTH (HEAD_LENGTH + DATA_NUM_LENGTH + MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH)
+#define RECV_BAG_LENGTH SEND_BAG_LENGTH
 
 uint8_t HEADER[2] = {0x44, 0x22};
 uint8_t RxBuffer[1] = {0};
-#define SLIDE_INIT_SIGNAL_LENGTH 3
-uint8_t slide_init_signal[SLIDE_INIT_SIGNAL_LENGTH] = {0};
+
 // 环形缓冲区定义
 #define PIPE_SIZE 64
 typedef struct __attribute__((packed))
@@ -67,7 +65,6 @@ typedef union
                 MotorData_t motor_data_struct[USE_MOTOR_NUM];
             }__attribute__((packed));
         };
-        uint8_t slide_init;
         uint8_t crc;
     }__attribute__((packed));
 }__attribute__((packed)) SEND_Bag_u;
@@ -83,7 +80,7 @@ void UartTransmitAll(DJI_Motor_s *Motor)
 
     UartBag.header[0] = HEADER[0];
     UartBag.header[1] = HEADER[1];
-    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH;
+    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH;
 
     /* 关中断快照，避免与 CAN 接收回调并发读写 float 撕裂 */
     for (int i = 0; i < USE_MOTOR_NUM; ++i) {
@@ -101,14 +98,11 @@ void UartTransmitAll(DJI_Motor_s *Motor)
         UartBag.motor_data_struct[i].torque_fdb = tq;
     }
 
-    UartBag.slide_init = slide_init_signal[0];
-
     UartBag.crc = 0;
-    for(int i = 2; i < 2 + UartBag.data_num-1; ++i)
+    for(int i = 2; i < 2 + UartBag.data_num - 1; ++i)
     {
         UartBag.crc += UartBag.data[i];
     }
-    UartBag.crc += UartBag.slide_init;
 
     HAL_UART_Transmit(&huart1, (uint8_t *)&UartBag, SEND_BAG_LENGTH, 10);
 }
@@ -119,7 +113,7 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
 
     UartBag.header[0] = HEADER[0];
     UartBag.header[1] = HEADER[1];
-    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + SLIDE_INIT_LENGTH + CRC_LENGTH;
+    UartBag.data_num = MOTOR_DATA_LENGTH * USE_MOTOR_NUM + CRC_LENGTH;
 
     for(int i = 0; i < USE_MOTOR_NUM; ++i)
     {
@@ -136,13 +130,11 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
         UartBag.motor_data_struct[i].torque_fdb = Motor[i].RefData.current_ref;
     }
 
-    UartBag.slide_init = slide_init_signal[0];
     UartBag.crc = 0;
-    for(int i = 2; i < 2 + UartBag.data_num-1; ++i)
+    for(int i = 2; i < 2 + UartBag.data_num - 1; ++i)
     {
         UartBag.crc += UartBag.data[i];
     }
-    UartBag.crc += UartBag.slide_init;
     HAL_UART_Transmit(&huart1, (uint8_t *)&UartBag, SEND_BAG_LENGTH, 10);
 }
 
@@ -178,7 +170,7 @@ void DataPipeProcess()
                 continue;
             }
             int total_packet_len = HEAD_LENGTH + DATA_NUM_LENGTH + data_num;
-            if (DataPipeAvailable(&data_pipe) < total_packet_len - 1) {
+            if (DataPipeAvailable(&data_pipe) < total_packet_len) {
                 // 数据不够，等待更多
                 break;
             }
@@ -269,14 +261,6 @@ void SerialTask()
     UART_INIT();
 
     for (;;) {
-        /* 滑块/限位历史，供上行包 slide_init 使用 */
-        for (int i = SLIDE_INIT_SIGNAL_LENGTH - 1; i > 0; --i) {
-            slide_init_signal[i] = slide_init_signal[i - 1];
-        }
-        uint8_t limit_reached = GPIO_PIN_SET - HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-        slide_init_signal[0] = limit_reached;
-        HAL_GPIO_WritePin(GPIOH, GPIO_PIN_12, limit_reached);
-
         /* 固定频率上送：位置/转速/力矩均来自 CAN 反馈，与控制模式无关 */
         UartTransmitAll(motor);
 
