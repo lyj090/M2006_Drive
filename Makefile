@@ -21,7 +21,7 @@ HEX := $(BUILD_DIR)/$(TARGET).hex
 
 NPROC := $(shell nproc 2>/dev/null || echo 4)
 
-.PHONY: all configure clean distclean flash openocd bin hex size
+.PHONY: all configure clean distclean flash flash-slow flash-stlink openocd bin hex size
 
 all: $(BUILD_DIR)/CMakeCache.txt
 	$(CMAKE) --build $(BUILD_DIR) --parallel $(NPROC)
@@ -56,6 +56,17 @@ size: all
 openocd:
 	$(OPENOCD) -s $(CURDIR)/openocd -s $(OPENOCD_SCRIPTS) -f $(OPENOCD_CFG)
 
+# OpenOCD 烧录：禁用 gdb/tcl 端口；halt 后 program；reset-init 已在 cfg 中限速
+OPENOCD_FLASH_CMDS := gdb_port disabled; tcl_port disabled; adapter_khz 480; init; halt; adapter_khz 480; program $(ELF) verify reset exit
+
 flash: all
 	$(OPENOCD) -s $(CURDIR)/openocd -s $(OPENOCD_SCRIPTS) -f $(OPENOCD_CFG) \
-		-c "program $(ELF) verify reset exit"
+		-c "$(OPENOCD_FLASH_CMDS)"
+
+flash-slow: all
+	$(OPENOCD) -s $(CURDIR)/openocd -s $(OPENOCD_SCRIPTS) -f $(OPENOCD_CFG) \
+		-c "gdb_port disabled; tcl_port disabled; adapter_khz 200; init; halt; program $(ELF) verify reset exit"
+
+# 备选：st-flash（不经过 OpenOCD reset-init 提速，运行中固件时往往更稳）
+flash-stlink: bin
+	st-flash --reset write $(BIN) 0x08000000

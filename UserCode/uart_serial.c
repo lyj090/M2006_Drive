@@ -99,7 +99,7 @@ void UartTransmitAll(DJI_Motor_s *Motor)
     }
 
     UartBag.crc = 0;
-    for(int i = 2; i < 2 + UartBag.data_num - 1; ++i)
+    for(int i = 2; i < 2 + UartBag.data_num; ++i)
     {
         UartBag.crc += UartBag.data[i];
     }
@@ -131,7 +131,7 @@ void UartTransmitDEBUG(DJI_Motor_s *Motor,float num)
     }
 
     UartBag.crc = 0;
-    for(int i = 2; i < 2 + UartBag.data_num - 1; ++i)
+    for(int i = 2; i < 2 + UartBag.data_num; ++i)
     {
         UartBag.crc += UartBag.data[i];
     }
